@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MUD Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0a0c0f;
+    --bg2:       #111418;
+    --bg3:       #181c22;
+    --border:    #2a3040;
+    --gold:      #c9a84c;
+    --gold-dim:  #7a6228;
+    --cyan:      #4ecdc4;
+    --red:       #e05555;
+    --green:     #5db85d;
+    --muted:     #556070;
+    --text:      #c8d0dc;
+    --text-dim:  #7a8898;
+    --font-mono: 'Share Tech Mono', monospace;
+    --font-title:'Cinzel', serif;
+  }
+
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-mono); font-size: 13px;
+  }
+
+  /* ── Layout ─────────────────────────────────── */
+  #shell {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    grid-template-rows: 40px 1fr 160px 36px;
+    grid-template-areas:
+      "titlebar  titlebar"
+      "viewport  sidebar"
+      "log       sidebar"
+      "input     sidebar";
+    width: 100vw; height: 100vh;
+    gap: 0;
+  }
+
+  /* ── Title bar ───────────────────────────────── */
+  #titlebar {
+    grid-area: titlebar;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 16px; gap: 12px;
+  }
+  #titlebar h1 {
+    font-family: var(--font-title);
+    font-size: 15px; color: var(--gold);
+    letter-spacing: 3px;
+  }
+  #titlebar .sep { flex: 1; }
+  #titlebar .tag {
+    font-size: 10px; color: var(--muted);
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+
+  /* ── Viewport (canvas) ───────────────────────── */
+  #viewport {
+    grid-area: viewport;
+    background: #060809;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    position: relative; overflow: hidden;
+  }
+  #gameCanvas { display: block; width: 100%; height: 100%; }
+
+  /* ── Sidebar ─────────────────────────────────── */
+  #sidebar {
+    grid-area: sidebar;
+    background: var(--bg2);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-title {
+    font-family: var(--font-title);
+    font-size: 10px; color: var(--gold-dim);
+    letter-spacing: 2px; text-transform: uppercase;
+    padding: 8px 14px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Stats panel */
+  #stats { padding: 12px 14px; }
+  .stat-row {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 10px;
+  }
+  .stat-label { color: var(--text-dim); font-size: 11px; }
+  .stat-bar {
+    width: 100px; height: 6px;
+    background: var(--bg3); border-radius: 3px; overflow: hidden;
+  }
+  .stat-fill {
+    height: 100%; border-radius: 3px;
+    transition: width 0.3s;
+  }
+  .stat-fill.hp  { background: var(--red); }
+  .stat-fill.mp  { background: var(--cyan); }
+  .stat-fill.xp  { background: var(--gold); }
+  .stat-val { color: var(--text); font-size: 11px; min-width: 40px; text-align: right; }
+
+  #char-name {
+    font-family: var(--font-title);
+    font-size: 13px; color: var(--gold);
+    margin-bottom: 10px; text-align: center;
+  }
+  #char-class { font-size: 10px; color: var(--muted); text-align: center; margin-bottom: 14px; }
+
+  /* Inventory */
+  #inventory { flex: 1; overflow-y: auto; }
+  #inv-list { padding: 6px 14px; }
+  .inv-item {
+    padding: 5px 8px; margin-bottom: 3px;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 3px; cursor: pointer;
+    display: flex; justify-content: space-between;
+    transition: border-color 0.15s;
+  }
+  .inv-item:hover { border-color: var(--gold-dim); }
+  .inv-item .item-name { color: var(--text); font-size: 11px; }
+  .inv-item .item-type { color: var(--muted); font-size: 10px; }
+
+  /* Room info strip */
+  #room-info {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+  }
+  #room-name {
+    font-family: var(--font-title); font-size: 12px;
+    color: var(--gold); margin-bottom: 4px;
+  }
+  #room-exits { font-size: 11px; color: var(--muted); }
+
+  /* ── Message log ─────────────────────────────── */
+  #log-panel {
+    grid-area: log;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #log {
+    flex: 1; overflow-y: auto;
+    padding: 8px 14px;
+    scroll-behavior: smooth;
+  }
+  #log::-webkit-scrollbar { width: 4px; }
+  #log::-webkit-scrollbar-track { background: transparent; }
+  #log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .log-line {
+    line-height: 1.6; font-size: 12px;
+    padding: 1px 0;
+    animation: fadein 0.2s ease;
+  }
+  @keyframes fadein { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; } }
+  .log-line.system   { color: var(--gold); }
+  .log-line.narrate  { color: var(--text); }
+  .log-line.cmd      { color: var(--muted); }
+  .log-line.combat   { color: var(--red); }
+  .log-line.loot     { color: var(--cyan); }
+  .log-line.error    { color: var(--red); opacity: 0.7; }
+
+  /* ── Input bar ───────────────────────────────── */
+  #input-bar {
+    grid-area: input;
+    background: var(--bg3);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 12px; gap: 8px;
+  }
+  #input-bar .prompt { color: var(--gold); font-size: 14px; }
+  #cmd-input {
+    flex: 1; background: transparent;
+    border: none; outline: none;
+    color: var(--text); font-family: var(--font-mono);
+    font-size: 13px; caret-color: var(--gold);
+  }
+  #input-bar .hint { color: var(--muted); font-size: 10px; }
+
+  /* ── Minimap overlay ─────────────────────────── */
+  #minimap {
+    position: absolute; top: 10px; right: 10px;
+    width: 100px; height: 100px;
+    background: rgba(6,8,9,0.85);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<div id="shell">
+  <!-- Title bar -->
+  <header id="titlebar">
+    <h1>⚔ MUD ENGINE</h1>
+    <span class="sep"></span>
+    <span class="tag" id="coord-display">0, 0</span>
+    <span class="tag" id="fps-display">-- fps</span>
+  </header>
+
+  <!-- Canvas viewport -->
+  <div id="viewport">
+    <canvas id="gameCanvas"></canvas>
+    <canvas id="minimap"></canvas>
+  </div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="panel-title">Character</div>
+    <div id="stats">
+      <div id="char-name">Aelindra</div>
+      <div id="char-class">Wandering Mage · Lv 1</div>
+      <div class="stat-row">
+        <span class="stat-label">HP</span>
+        <div class="stat-bar"><div class="stat-fill hp" id="bar-hp" style="width:80%"></div></div>
+        <span class="stat-val" id="val-hp">40/50</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">MP</span>
+        <div class="stat-bar"><div class="stat-fill mp" id="bar-mp" style="width:60%"></div></div>
+        <span class="stat-val" id="val-mp">18/30</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">XP</span>
+        <div class="stat-bar"><div class="stat-fill xp" id="bar-xp" style="width:25%"></div></div>
+        <span class="stat-val" id="val-xp">25/100</span>
+      </div>
+    </div>
+
+    <div class="panel-title">Inventory</div>
+    <div id="inventory">
+      <div id="inv-list"></div>
+    </div>
+
+    <div id="room-info">
+      <div class="panel-title" style="padding:0 0 6px; border:none;">Current Room</div>
+      <div id="room-name">Loading…</div>
+      <div id="room-exits"></div>
+    </div>
+  </aside>
+
+  <!-- Message log -->
+  <div id="log-panel">
+    <div class="panel-title">Message Log</div>
+    <div id="log"></div>
+  </div>
+
+  <!-- Command input -->
+  <div id="input-bar">
+    <span class="prompt">&gt;</span>
+    <input id="cmd-input" type="text" autocomplete="off" spellcheck="false" placeholder="type a command or use arrow keys to move…" />
+    <span class="hint">WASD / ↑↓←→ · help</span>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  ENGINE CORE
+// ═══════════════════════════════════════════════
+
+const Engine = (() => {
+
+  // ── Canvas setup ──────────────────────────────
+  const canvas   = document.getElementById('gameCanvas');
+  const ctx      = canvas.getContext('2d');
+  const miniCvs  = document.getElementById('minimap');
+  const miniCtx  = miniCvs.getContext('2d');
+
+  function resizeCanvas() {
+    const vp = document.getElementById('viewport');
+    canvas.width  = vp.clientWidth;
+    canvas.height = vp.clientHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  const TILE = 32; // px per tile
+
+  // ── Palette ────────────────────────────────────
+  const C = {
+    floor:      '#161a1f',
+    floorAlt:   '#131720',
+    wall:       '#0c0e11',
+    wallTop:    '#2a3040',
+    grass:      '#1a2b18',
+    water:      '#0d2233',
+    waterShine: '#1a4060',
+    door:       '#5a3a1a',
+    doorFrame:  '#c9a84c',
+    stair:      '#3a2a10',
+    chest:      '#8B5E2A',
+    npc:        '#4ecdc4',
+    player:     '#c9a84c',
+    enemy:      '#e05555',
+    item:       '#4ecdc4',
+    dark:       'rgba(0,0,0,0.92)',
+    shadow:     'rgba(0,0,0,0.5)',
+  };
+
+  // ── Tile types ─────────────────────────────────
+  const T = {
+    WALL:  0,
+    FLOOR: 1,
+    GRASS: 2,
+    WATER: 3,
+    DOOR:  4,
+    STAIR_DOWN: 5,
+    STAIR_UP:   6,
+    CHEST: 7,
+  };
+
+  // ── Draw a single tile ─────────────────────────
+  function drawTile(c, x, y, type, lit) {
+    const px = x * TILE, py = y * TILE;
+    if (!lit) {
+      c.fillStyle = '#08090b';
+      c.fillRect(px, py, TILE, TILE);
+      return;
+    }
+    switch(type) {
+      case T.WALL:
+        c.fillStyle = C.wall;
+        c.fillRect(px, py, TILE, TILE);
+        c.fillStyle = C.wallTop;
+        c.fillRect(px, py, TILE, 4);
+        c.fillRect(px, py, 2, TILE);
+        c.fillRect(px + TILE - 2, py, 2, TILE);
+        break;
+      case T.FLOOR:
+        c.fillStyle = (x + y) % 2 === 0 ? C.floor : C.floorAlt;
+        c.fillRect(px, py, TILE, TILE);
+        break;
+      case T.GRASS:
+        c.fillStyle = C.grass;
+        c.fillRect(px, py, TILE, TILE);
+        // Tiny grass tufts
+        c.fillStyle = '#2a3f26';
+        [[6,8],[14,20],[22,10],[26,22],[10,26]].forEach(([dx,dy])=>{
+          c.fillRect(px+dx, py+dy, 2, 4);
+        });
+        break;
+      case T.WATER:
+        c.fillStyle = C.water;
+        c.fillRect(px, py, TILE, TILE);
+        c.fillStyle = C.waterShine;
+        c.fillRect(px+4, py+10, TILE-8, 2);
+        c.fillRect(px+8, py+20, TILE-14, 2);
+        break;
+      case T.DOOR:
+        c.fillStyle = C.floor;
+        c.fillRect(px, py, TILE, TILE);
+        c.fillStyle = C.door;
+        c.fillRect(px+4, py+2, TILE-8, TILE-2);
+        c.strokeStyle = C.doorFrame;
+        c.lineWidth = 1.5;
+        c.strokeRect(px+4, py+2, TILE-8, TILE-2);
+        c.fillStyle = C.doorFrame;
+        c.fillRect(px+13, py+13, 6, 6);
+        break;
+      case T.STAIR_DOWN:
+        c.fillStyle = C.floor;
+        c.fillRect(px, py, TILE, TILE);
+        c.fillStyle = C.stair;
+        for(let s=0;s<5;s++){
+          c.fillRect(px+4+s*2, py+6+s*4, TILE-8-s*4, 3);
+        }
+        break;
+      case T.STAIR_UP:
+        c.fillStyle = C.floor;
+        c.fillRect(px, py, TILE, TILE);
+        c.fillStyle = C.stair;
+        for(let s=4;s>=0;s--){
+          c.fillRect(px+4+s*2, py+6+(4-s)*4, TILE-8-s*4, 3);
+        }
+        break;
+      case T.CHEST:
+        c.fillStyle = C.floor;
+        c.fillRect(px, py, TILE, TILE);
+        c.fillStyle = C.chest;
+        c.fillRect(px+4, py+10, TILE-8, TILE-16);
+        c.fillStyle = '#c9a84c';
+        c.fillRect(px+4, py+10, TILE-8, 4);
+        c.fillRect(px+12, py+14, 8, 6);
+        break;
+    }
+  }
+
+  // ── Draw entity ────────────────────────────────
+  function drawEntity(c, ex, ey, type, camX, camY, label) {
+    const px = (ex - camX) * TILE + TILE/2;
+    const py = (ey - camY) * TILE + TILE/2;
+    const r  = TILE * 0.38;
+    c.beginPath();
+    switch(type) {
+      case 'player':
+        // Diamond shape
+        c.moveTo(px, py - r);
+        c.lineTo(px + r, py);
+        c.lineTo(px, py + r);
+        c.lineTo(px - r, py);
+        c.closePath();
+        c.fillStyle = C.player;
+        c.fill();
+        c.strokeStyle = '#f0d080';
+        c.lineWidth = 1.5;
+        c.stroke();
+        break;
+      case 'npc':
+        c.arc(px, py, r, 0, Math.PI*2);
+        c.fillStyle = C.npc;
+        c.fill();
+        c.strokeStyle = '#80f0e8';
+        c.lineWidth = 1; c.stroke();
+        break;
+      case 'enemy':
+        c.moveTo(px, py - r);
+        c.lineTo(px + r, py + r);
+        c.lineTo(px - r, py + r);
+        c.closePath();
+        c.fillStyle = C.enemy;
+        c.fill();
+        c.strokeStyle = '#ff8080';
+        c.lineWidth = 1; c.stroke();
+        break;
+      case 'item':
+        c.arc(px, py, r * 0.6, 0, Math.PI * 2);
+        c.fillStyle = C.item;
+        c.fill();
+        break;
+    }
+    if (label) {
+      c.font = '9px Share Tech Mono, monospace';
+      c.fillStyle = 'rgba(200,208,220,0.8)';
+      c.textAlign = 'center';
+      c.fillText(label, px, py - r - 4);
+    }
+  }
+
+  // ═══════════════════════════════════════════════
+  //  WORLD DATA
+  // ═══════════════════════════════════════════════
+
+  // Rooms are tile maps. Entities are placed by the room definition.
+  const world = {
+    currentRoom: 'town_square',
+    rooms: {
+
+      town_square: {
+        name: 'Town Square',
+        description: 'The cobblestone square hums with quiet life. Torchlight flickers off worn stone.',
+        width: 20, height: 15,
+        map: [
+          [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+          [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+          [0,1,1,2,2,2,2,1,1,1,1,1,2,2,2,2,2,1,1,0],
+          [0,1,1,2,2,2,2,1,1,1,1,1,2,2,2,2,2,1,1,0],
+          [0,1,1,2,2,2,2,1,1,7,1,1,2,2,2,2,2,1,1,0],
+          [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,3,3,3,3,3,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,3,3,3,3,3,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,1,1,1,1,5,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+          [0,1,1,1,1,1,1,4,1,1,1,1,1,4,1,1,1,1,1,0],
+          [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        ],
+        exits: { north: 'dungeon_entrance', south: null, east: null, west: null },
+        spawnPlayer: { x: 10, y: 7 },
+        entities: [
+          { id: 'guard1', type: 'npc', x: 5, y: 4, name: 'Guard', dialog: ['Halt, traveller.', 'The dungeon to the north is dangerous.', 'Stay on the path.'] },
+          { id: 'merchant', type: 'npc', x: 15, y: 4, name: 'Merchant', dialog: ['Fine wares! Fine wares!', 'Buy something, won\'t you?'] },
+          { id: 'chest1', type: 'item', x: 9, y: 5, name: 'Chest', itemId: 'rusty_sword' },
+        ],
+      },
+
+      dungeon_entrance: {
+        name: 'Dungeon Entrance',
+        description: 'Cold air rises from below. The stone walls weep with moisture. Something moves in the dark.',
+        width: 18, height: 14,
+        map: [
+          [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+          [0,0,0,0,0,0,0,4,0,4,0,0,0,0,0,0,0,0],
+          [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],
+          [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],
+          [0,0,1,1,0,0,1,1,1,1,1,0,0,1,1,0,0,0],
+          [0,0,1,1,0,0,1,1,1,1,1,0,0,1,1,0,0,0],
+          [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],
+          [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],
+          [0,0,1,1,0,0,0,1,1,1,0,0,0,1,1,0,0,0],
+          [0,0,1,1,0,0,0,1,1,1,0,0,0,1,1,0,0,0],
+          [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],
+          [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0],
+          [0,0,0,0,0,0,0,0,6,0,0,0,0,0,0,0,0,0],
+          [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        ],
+        exits: { south: 'town_square', north: null, east: null, west: null },
+        spawnPlayer: { x: 8, y: 2 },
+        entities: [
+          { id: 'rat1', type: 'enemy', x: 5, y: 6, name: 'Giant Rat', hp: 8, maxHp: 8 },
+          { id: 'rat2', type: 'enemy', x: 12, y: 9, name: 'Giant Rat', hp: 8, maxHp: 8 },
+          { id: 'potion1', type: 'item', x: 4, y: 10, name: 'Health Potion', itemId: 'health_potion' },
+        ],
+      }
+    },
+
+    // Item definitions
+    items: {
+      rusty_sword:    { name: 'Rusty Sword',    type: 'weapon',  desc: 'Worn but sharp enough.' },
+      health_potion:  { name: 'Health Potion',  type: 'potion',  desc: 'Restores 20 HP.' },
+      leather_armour: { name: 'Leather Armour', type: 'armour',  desc: 'Better than nothing.' },
+      torch:          { name: 'Torch',          type: 'misc',    desc: 'Lights the way.' },
+    }
+  };
+
+  // ═══════════════════════════════════════════════
+  //  GAME STATE
+  // ═══════════════════════════════════════════════
+
+  const state = {
+    player: {
+      name: 'Aelindra',
+      cls:  'Wandering Mage',
+      level: 1,
+      x: 10, y: 7,
+      hp: 40, maxHp: 50,
+      mp: 18, maxMp: 30,
+      xp: 25, xpNext: 100,
+      atk: 8, def: 4,
+      inventory: ['torch'],
+    },
+    entities: [],      // active room entities (cloned from room def)
+    visited: new Set(),
+    lighting: true,
+    fov: new Set(),
+  };
+
+  // Camera (top-left tile coords)
+  const cam = { x: 0, y: 0 };
+
+  // ── FOV (simple radius) ────────────────────────
+  function computeFOV(room) {
+    state.fov.clear();
+    const r = 7;
+    const px = state.player.x, py = state.player.y;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx*dx + dy*dy <= r*r) {
+          state.fov.add(`${px+dx},${py+dy}`);
+        }
+      }
+    }
+  }
+
+  // ── Load a room ────────────────────────────────
+  function loadRoom(roomId, fromExit) {
+    const room = world.rooms[roomId];
+    if (!room) return;
+    world.currentRoom = roomId;
+
+    // Place player at spawn (or exit-specific position)
+    state.player.x = room.spawnPlayer.x;
+    state.player.y = room.spawnPlayer.y;
+
+    // Clone entities from room definition
+    state.entities = room.entities
+      .filter(e => !state.visited.has(`${roomId}:${e.id}`))
+      .map(e => ({ ...e }));
+
+    computeFOV(room);
+    centerCamera(room);
+    updateSidebar(room);
+    log(`You enter <b>${room.name}</b>.`, 'system');
+    log(room.description, 'narrate');
+    logExits(room);
+  }
+
+  function centerCamera(room) {
+    const tilesW = Math.floor(canvas.width  / TILE);
+    const tilesH = Math.floor(canvas.height / TILE);
+    cam.x = Math.max(0, Math.min(room.width  - tilesW, state.player.x - Math.floor(tilesW/2)));
+    cam.y = Math.max(0, Math.min(room.height - tilesH, state.player.y - Math.floor(tilesH/2)));
+  }
+
+  function logExits(room) {
+    const exits = Object.entries(room.exits)
+      .filter(([,v]) => v)
+      .map(([dir]) => dir.toUpperCase())
+      .join(', ');
+    log(`Exits: ${exits || 'none'}`, 'cmd');
+  }
+
+  // ═══════════════════════════════════════════════
+  //  RENDER LOOP
+  // ═══════════════════════════════════════════════
+
+  let lastTime = 0, fps = 0;
+
+  function render(ts) {
+    const dt = ts - lastTime; lastTime = ts;
+    fps = Math.round(1000 / dt);
+
+    const room = world.rooms[world.currentRoom];
+    if (!room) { requestAnimationFrame(render); return; }
+
+    const tilesW = Math.floor(canvas.width  / TILE) + 2;
+    const tilesH = Math.floor(canvas.height / TILE) + 2;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw tiles
+    for (let ty = 0; ty < tilesH; ty++) {
+      for (let tx = 0; tx < tilesW; tx++) {
+        const wx = cam.x + tx, wy = cam.y + ty;
+        if (wx < 0 || wy < 0 || wx >= room.width || wy >= room.height) {
+          ctx.fillStyle = '#05060a';
+          ctx.fillRect(tx*TILE, ty*TILE, TILE, TILE);
+          continue;
+        }
+        const tileType = room.map[wy][wx];
+        const lit = state.fov.has(`${wx},${wy}`);
+        drawTile(ctx, tx, ty, tileType, lit);
+      }
+    }
+
+    // Draw entities
+    state.entities.forEach(e => {
+      if (!state.fov.has(`${e.x},${e.y}`)) return;
+      if (e.x >= cam.x && e.x < cam.x + tilesW &&
+          e.y >= cam.y && e.y < cam.y + tilesH) {
+        drawEntity(ctx, e.x, e.y, e.type, cam.x, cam.y, e.name);
+      }
+    });
+
+    // Draw player
+    drawEntity(ctx, state.player.x, state.player.y, 'player', cam.x, cam.y, state.player.name);
+
+    // Light vignette
+    const vigX = (state.player.x - cam.x + 0.5) * TILE;
+    const vigY = (state.player.y - cam.y + 0.5) * TILE;
+    const rad  = 7 * TILE;
+    const vig  = ctx.createRadialGradient(vigX, vigY, rad * 0.4, vigX, vigY, rad * 1.2);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.85)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Minimap
+    drawMinimap(room);
+
+    // HUD
+    document.getElementById('coord-display').textContent = `${state.player.x}, ${state.player.y}`;
+    document.getElementById('fps-display').textContent   = `${fps} fps`;
+
+    requestAnimationFrame(render);
+  }
+
+  function drawMinimap(room) {
+    const mw = miniCvs.width, mh = miniCvs.height;
+    const tw = mw / room.width, th = mh / room.height;
+    miniCtx.clearRect(0, 0, mw, mh);
+    miniCtx.fillStyle = '#06080a';
+    miniCtx.fillRect(0, 0, mw, mh);
+    for (let y = 0; y < room.height; y++) {
+      for (let x = 0; x < room.width; x++) {
+        const t = room.map[y][x];
+        miniCtx.fillStyle = t === T.WALL ? '#1a2030' : '#2a3a4a';
+        miniCtx.fillRect(x*tw, y*th, tw-0.5, th-0.5);
+      }
+    }
+    // Player dot
+    miniCtx.fillStyle = '#c9a84c';
+    miniCtx.fillRect(state.player.x*tw - 1, state.player.y*th - 1, 3, 3);
+  }
+
+  // ═══════════════════════════════════════════════
+  //  MOVEMENT & COLLISION
+  // ═══════════════════════════════════════════════
+
+  const WALKABLE = new Set([T.FLOOR, T.GRASS, T.DOOR, T.STAIR_DOWN, T.STAIR_UP, T.CHEST]);
+
+  function tryMove(dx, dy) {
+    const room = world.rooms[world.currentRoom];
+    const nx = state.player.x + dx;
+    const ny = state.player.y + dy;
+
+    if (nx < 0 || ny < 0 || nx >= room.width || ny >= room.height) return;
+    const tile = room.map[ny][nx];
+    if (!WALKABLE.has(tile)) { log('The way is blocked.', 'cmd'); return; }
+
+    // Check entity collision
+    const hit = state.entities.find(e => e.x === nx && e.y === ny);
+    if (hit) {
+      if (hit.type === 'enemy')  { doAttack(hit); return; }
+      if (hit.type === 'npc')    { doTalk(hit);   return; }
+      if (hit.type === 'item')   { doPickup(hit); }
+    }
+
+    // Tile interaction
+    if (tile === T.STAIR_DOWN) {
+      const dest = room.exits.north;
+      if (dest) { loadRoom(dest); return; }
+    }
+    if (tile === T.STAIR_UP) {
+      const dest = room.exits.south;
+      if (dest) { loadRoom(dest); return; }
+    }
+    if (tile === T.CHEST) {
+      openChest(nx, ny); return;
+    }
+
+    state.player.x = nx;
+    state.player.y = ny;
+    computeFOV(room);
+    centerCamera(room);
+  }
+
+  function openChest(cx, cy) {
+    const room = world.rooms[world.currentRoom];
+    const entity = state.entities.find(e => e.x === cx && e.y === cy && e.type === 'item');
+    if (entity && entity.itemId) {
+      const item = world.items[entity.itemId];
+      if (item) {
+        state.player.inventory.push(entity.itemId);
+        log(`You open the chest and find a <b>${item.name}</b>!`, 'loot');
+        log(item.desc, 'narrate');
+        state.visited.add(`${world.currentRoom}:${entity.id}`);
+        state.entities = state.entities.filter(e => e !== entity);
+        room.map[cy][cx] = T.FLOOR;
+        updateInventory();
+      }
+    } else {
+      log('The chest is empty.', 'narrate');
+    }
+    state.player.x = cx; state.player.y = cy;
+    computeFOV(room);
+  }
+
+  // ═══════════════════════════════════════════════
+  //  COMBAT
+  // ═══════════════════════════════════════════════
+
+  function doAttack(enemy) {
+    const dmg = Math.max(1, state.player.atk - 2 + Math.floor(Math.random() * 5));
+    enemy.hp -= dmg;
+    log(`You strike the <b>${enemy.name}</b> for <b>${dmg}</b> damage!`, 'combat');
+    if (enemy.hp <= 0) {
+      log(`The <b>${enemy.name}</b> is slain!`, 'system');
+      state.player.xp += 15;
+      state.visited.add(`${world.currentRoom}:${enemy.id}`);
+      state.entities = state.entities.filter(e => e !== enemy);
+      checkLevelUp();
+      updateStatBars();
+      return;
+    }
+    // Enemy counterattack
+    const edgm = Math.max(1, 4 - state.player.def + Math.floor(Math.random()*4));
+    state.player.hp = Math.max(0, state.player.hp - edgm);
+    log(`The <b>${enemy.name}</b> bites back for <b>${edgm}</b>!`, 'combat');
+    updateStatBars();
+    if (state.player.hp <= 0) log('You have fallen. [GAME OVER — type "restart"]', 'error');
+  }
+
+  function checkLevelUp() {
+    if (state.player.xp >= state.player.xpNext) {
+      state.player.level++;
+      state.player.xp = 0; state.player.xpNext = state.player.level * 100;
+      state.player.maxHp += 10; state.player.hp = state.player.maxHp;
+      state.player.maxMp += 5;  state.player.mp = state.player.maxMp;
+      state.player.atk += 2; state.player.def += 1;
+      log(`⚡ Level up! You are now level ${state.player.level}.`, 'system');
+    }
+  }
+
+  // ═══════════════════════════════════════════════
+  //  DIALOG
+  // ═══════════════════════════════════════════════
+
+  const dialogState = {};
+  function doTalk(npc) {
+    const lines = npc.dialog;
+    const idx = dialogState[npc.id] || 0;
+    log(`<b>${npc.name}</b>: "${lines[idx % lines.length]}"`, 'narrate');
+    dialogState[npc.id] = (idx + 1) % lines.length;
+  }
+
+  function doPickup(entity) {
+    if (entity.itemId) {
+      const item = world.items[entity.itemId];
+      state.player.inventory.push(entity.itemId);
+      log(`You pick up a <b>${item.name}</b>.`, 'loot');
+      state.visited.add(`${world.currentRoom}:${entity.id}`);
+      state.entities = state.entities.filter(e => e !== entity);
+      updateInventory();
+    }
+  }
+
+  // ═══════════════════════════════════════════════
+  //  COMMAND PARSER
+  // ═══════════════════════════════════════════════
+
+  const cmdHistory = [];
+  let   histIdx    = -1;
+
+  const COMMANDS = {
+    help() {
+      log('Commands: move [n/s/e/w], look, inventory, stats, use [item], talk, attack, restart', 'system');
+      log('Or use WASD / arrow keys to move.', 'cmd');
+    },
+    look() {
+      const room = world.rooms[world.currentRoom];
+      log(`<b>${room.name}</b> — ${room.description}`, 'narrate');
+      logExits(room);
+      const visible = state.entities.filter(e => state.fov.has(`${e.x},${e.y}`));
+      if (visible.length) log(`You see: ${visible.map(e=>e.name).join(', ')}.`, 'narrate');
+    },
+    inventory() {
+      if (!state.player.inventory.length) { log('You carry nothing.', 'narrate'); return; }
+      log('You carry: ' + state.player.inventory.map(id => world.items[id]?.name || id).join(', '), 'narrate');
+    },
+    stats() {
+      const p = state.player;
+      log(`${p.name} · ${p.cls} · Level ${p.level}`, 'system');
+      log(`HP: ${p.hp}/${p.maxHp}  MP: ${p.mp}/${p.maxMp}  ATK: ${p.atk}  DEF: ${p.def}`, 'narrate');
+      log(`XP: ${p.xp}/${p.xpNext}`, 'narrate');
+    },
+    restart() {
+      Object.assign(state.player, {
+        hp:40,maxHp:50,mp:18,maxMp:30,xp:0,xpNext:100,
+        level:1,atk:8,def:4,inventory:['torch'],x:10,y:7
+      });
+      state.visited.clear();
+      loadRoom('town_square');
+      log('A new journey begins…', 'system');
+      updateStatBars();
+    },
+  };
+
+  const MOVE_DIRS = { n:[0,-1],s:[0,1],e:[1,0],w:[-1,0], north:[0,-1],south:[0,1],east:[1,0],west:[-1,0] };
+
+  function parseCommand(raw) {
+    const parts = raw.trim().toLowerCase().split(/\s+/);
+    const verb  = parts[0];
+    const args  = parts.slice(1);
+
+    log('> ' + raw, 'cmd');
+
+    // Move shorthand: "n", "go north", "move w"
+    if (MOVE_DIRS[verb]) { tryMove(...MOVE_DIRS[verb]); return; }
+    if ((verb === 'go' || verb === 'move') && MOVE_DIRS[args[0]]) { tryMove(...MOVE_DIRS[args[0]]); return; }
+
+    // Talk shorthand
+    if (verb === 'talk' || verb === 'speak') {
+      const nearby = state.entities.find(e =>
+        e.type === 'npc' && Math.abs(e.x-state.player.x)<=1 && Math.abs(e.y-state.player.y)<=1);
+      if (nearby) doTalk(nearby);
+      else log('There is no one nearby to talk to.', 'narrate');
+      return;
+    }
+
+    // Attack
+    if (verb === 'attack' || verb === 'kill') {
+      const nearby = state.entities.find(e =>
+        e.type === 'enemy' && Math.abs(e.x-state.player.x)<=1 && Math.abs(e.y-state.player.y)<=1);
+      if (nearby) doAttack(nearby);
+      else log('There is nothing to attack here.', 'narrate');
+      return;
+    }
+
+    // Use item
+    if (verb === 'use' || verb === 'drink') {
+      const target = args.join(' ');
+      const itemId = state.player.inventory.find(id => world.items[id]?.name.toLowerCase().includes(target));
+      if (!itemId) { log(`You don't have that.`, 'error'); return; }
+      const item = world.items[itemId];
+      if (item.type === 'potion') {
+        const heal = 20;
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + heal);
+        state.player.inventory.splice(state.player.inventory.indexOf(itemId), 1);
+        log(`You drink the ${item.name} and recover ${heal} HP.`, 'loot');
+        updateStatBars(); updateInventory();
+      } else {
+        log(`You ready the ${item.name}.`, 'narrate');
+      }
+      return;
+    }
+
+    if (COMMANDS[verb]) { COMMANDS[verb](args); return; }
+    log(`Unknown command: "${verb}". Type "help" for a list.`, 'error');
+  }
+
+  // ═══════════════════════════════════════════════
+  //  INPUT HANDLING
+  // ═══════════════════════════════════════════════
+
+  const input = document.getElementById('cmd-input');
+
+  document.addEventListener('keydown', e => {
+    const tag = document.activeElement.tagName;
+
+    // Arrow keys move when input is NOT focused
+    if (tag !== 'INPUT') {
+      const map = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
+                    w:[0,-1], s:[0,1], a:[-1,0], d:[1,0] };
+      if (map[e.key]) { e.preventDefault(); tryMove(...map[e.key]); return; }
+    }
+
+    // WASD always moves (don't capture if typing in input)
+    if (tag !== 'INPUT') {
+      const wsad = { KeyW:[0,-1], KeyS:[0,1], KeyA:[-1,0], KeyD:[1,0] };
+      if (wsad[e.code]) { e.preventDefault(); tryMove(...wsad[e.code]); return; }
+    }
+
+    // Arrow keys when input focused = history
+    if (tag === 'INPUT') {
+      if (e.key === 'ArrowUp') {
+        histIdx = Math.min(histIdx+1, cmdHistory.length-1);
+        input.value = cmdHistory[histIdx] || '';
+        e.preventDefault();
+      }
+      if (e.key === 'ArrowDown') {
+        histIdx = Math.max(histIdx-1, -1);
+        input.value = cmdHistory[histIdx] || '';
+        e.preventDefault();
+      }
+    }
+
+    // Press Enter anywhere to focus input
+    if (e.key === 'Enter' && tag !== 'INPUT') { input.focus(); }
+  });
+
+  // Arrow key movement even when canvas is focused
+  document.getElementById('viewport').addEventListener('keydown', e => {
+    const map = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] };
+    if (map[e.key]) { e.preventDefault(); tryMove(...map[e.key]); }
+  });
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const val = input.value.trim();
+      if (!val) return;
+      cmdHistory.unshift(val);
+      histIdx = -1;
+      input.value = '';
+      parseCommand(val);
+    }
+    // Allow WASD movement while input is focused too (without conflicting)
+    if (!input.value && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+      const map = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] };
+      e.preventDefault();
+      tryMove(...map[e.key]);
+    }
+  });
+
+  // Click canvas to focus it for arrow keys
+  canvas.addEventListener('click', () => canvas.focus());
+
+  // ═══════════════════════════════════════════════
+  //  UI HELPERS
+  // ═══════════════════════════════════════════════
+
+  function log(msg, type = 'narrate') {
+    const el = document.getElementById('log');
+    const line = document.createElement('div');
+    line.className = `log-line ${type}`;
+    line.innerHTML = msg;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+    // Keep log tidy
+    while (el.children.length > 200) el.removeChild(el.firstChild);
+  }
+
+  function updateStatBars() {
+    const p = state.player;
+    const set = (id, fill, val, max, label) => {
+      document.getElementById(fill).style.width = `${Math.round(val/max*100)}%`;
+      document.getElementById(label).textContent = `${val}/${max}`;
+    };
+    set('bar-hp','bar-hp',p.hp,p.maxHp,'val-hp');
+    set('bar-mp','bar-mp',p.mp,p.maxMp,'val-mp');
+    document.getElementById('bar-hp').style.width  = `${Math.round(p.hp/p.maxHp*100)}%`;
+    document.getElementById('val-hp').textContent   = `${p.hp}/${p.maxHp}`;
+    document.getElementById('bar-mp').style.width  = `${Math.round(p.mp/p.maxMp*100)}%`;
+    document.getElementById('val-mp').textContent   = `${p.mp}/${p.maxMp}`;
+    document.getElementById('bar-xp').style.width  = `${Math.round(p.xp/p.xpNext*100)}%`;
+    document.getElementById('val-xp').textContent   = `${p.xp}/${p.xpNext}`;
+  }
+
+  function updateInventory() {
+    const list = document.getElementById('inv-list');
+    list.innerHTML = '';
+    if (!state.player.inventory.length) {
+      list.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:6px 0">Nothing carried.</div>';
+      return;
+    }
+    state.player.inventory.forEach(id => {
+      const item = world.items[id];
+      if (!item) return;
+      const div = document.createElement('div');
+      div.className = 'inv-item';
+      div.innerHTML = `<span class="item-name">${item.name}</span><span class="item-type">${item.type}</span>`;
+      div.addEventListener('click', () => parseCommand(`use ${item.name.toLowerCase()}`));
+      list.appendChild(div);
+    });
+  }
+
+  function updateSidebar(room) {
+    document.getElementById('room-name').textContent = room.name;
+    const exits = Object.entries(room.exits).filter(([,v])=>v).map(([d])=>d).join(', ') || 'none';
+    document.getElementById('room-exits').textContent = `Exits: ${exits}`;
+    document.getElementById('char-name').textContent  = state.player.name;
+    document.getElementById('char-class').textContent = `${state.player.cls} · Lv ${state.player.level}`;
+    updateStatBars();
+    updateInventory();
+  }
+
+  // ═══════════════════════════════════════════════
+  //  BOOT
+  // ═══════════════════════════════════════════════
+
+  function init() {
+    log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'system');
+    log('         ⚔  MUD ENGINE  ⚔', 'system');
+    log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'system');
+    log('Type <b>help</b> for commands. Use WASD or arrow keys to move.', 'cmd');
+    log('Walk into enemies to attack. Walk into NPCs to talk.', 'cmd');
+    loadRoom('town_square');
+    requestAnimationFrame(render);
+    input.focus();
+  }
+
+  init();
+
+  // Expose engine API for extending
+  return { state, world, log, loadRoom, parseCommand, COMMANDS, T, MOVE_DIRS };
+})();
+
+// ═══════════════════════════════════════════════
+//  EXTEND THE ENGINE HERE
+//  e.g. Engine.world.rooms['my_room'] = { ... }
+//       Engine.COMMANDS['cast'] = (args) => { ... }
+//       Engine.world.items['magic_wand'] = { ... }
+// ═══════════════════════════════════════════════
+</script>
+</body>
+</html>
